@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import axios from 'axios'
 import { url } from "./url";
+import { Modal, Button, ProgressBar } from "react-bootstrap";
 
 export default function Anonymize() {
     const [file, setFile] = useState("");
@@ -10,123 +11,45 @@ export default function Anonymize() {
     const [isDone, setIsDone] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
     const canvasRef = useRef(null);
+    // MODAL FUNCTIONS
+    const [show, setShow] = useState(false);
+    const handleClose = () => setShow(false);
+    const handleShow = () => setShow(true);
+    const [progression, setprogression] = useState(0)
+    // SOCKET
+    const socket = window.io(url);
 
     useEffect(() => {
-        // SOCKET
-        const socket = window.io(url);
         socket.on('connect', function () {
             console.log("Connected to server")
         });
 
-        socket.on('state', function (data) {
+        socket.on('disconnect', function (data) {
             console.log(data)
+            console.log("Disconnected to server")
+        });
+
+        socket.on('result', function () {
+            handleShow()
+        });
+
+        socket.on('progression-state', function (data) {
+            setprogression(data.message)
+        });
+
+        socket.on('state', function (data) {
             setMessage(data.message)
         });
 
+    }, []);
 
-        if (file) {
-            var startX, startY, mouseX, mouseY, newRect;
-            var canvas = document.getElementById("canvas");
-            var context = canvas.getContext("2d");
-            var imageObj = new Image();
-            var isRecDown = false;
-            var rects = [];
-
-            imageObj.src = file;
-            imageObj.onload = function () {
-                context.drawImage(imageObj, 0, 0, canvas.width, canvas.height);
-            };
-
-            function handleMouseDown(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                startX = e.clientX - this.offsetLeft;
-                startY = e.clientY - this.offsetTop;
-                isRecDown = true;
-            }
-
-            function handleMouseUp(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                mouseX = e.clientX - this.offsetLeft;
-                mouseY = e.clientY - this.offsetTop;
-                isRecDown = false;
-                rects.push(newRect);
-                drawAllRect();
-            }
-
-            function drawAllRect() {
-                context.clearRect(0, 0, canvas.width, canvas.height);
-                context.drawImage(imageObj, 0, 0, canvas.width, canvas.height);
-                context.lineWidth = 1;
-                rects.forEach((rect) => {
-                    context.strokeStyle = rect.color;
-                    context.globalAlpha = 1;
-                    context.strokeRect(
-                        rect.left,
-                        rect.top,
-                        rect.right - rect.left,
-                        rect.bottom - rect.top
-                    );
-                    context.beginPath();
-                    context.closePath();
-                    context.fillStyle = rect.color;
-                    context.fill();
-                });
-            }
-
-            function handleMouseOut(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                mouseX = e.clientX - this.offsetLeft;
-                mouseY = e.clientY - this.offsetTop;
-                isRecDown = false;
-            }
-
-            function handleMouseMove(e) {
-                if (isRecDown) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    mouseX = e.clientX - this.offsetLeft;
-                    mouseY = e.clientY - this.offsetTop;
-                    newRect = {
-                        left: Math.min(startX, mouseX),
-                        right: Math.max(startX, mouseX),
-                        top: Math.min(startY, mouseY),
-                        bottom: Math.max(startY, mouseY),
-                        color: "red",
-                    };
-                    drawAllRect();
-                    context.strokeStyle = "red";
-                    context.lineWidth = 1;
-                    context.globalAlpha = 1;
-                    context.strokeRect(startX, startY, mouseX - startX, mouseY - startY);
-                }
-            }
-
-            canvas.addEventListener("mousemove", handleMouseMove, false);
-            canvas.addEventListener("mousedown", handleMouseDown, false);
-            canvas.addEventListener("mouseup", handleMouseUp, false);
-            canvas.addEventListener("mouseout", handleMouseOut, false);
-        }
-    }, [file]);
-
-    const handleChange = function (e) {
-        var files = e.target.files[0];
-        var reader = new FileReader();
-        reader.onload = function () {
-            setFile(this.result);
-        };
-        reader.readAsDataURL(files);
-    };
-
-    const uploadImage = (e) => {
+    const uploadImage = async (e) => {
         e.preventDefault();
         setIsDone(false)
         const files = document.querySelector('[type=file]').files;
         const newFile = new FormData();
-        newFile.append('name', document.getElementById('name').value);
-        newFile.append('email', document.getElementById('email').value);
+        const name = document.getElementById('name').value;
+        const email = document.getElementById('email').value;
 
         for (let i = 0; i < files.length; i++) {
             let file = files[i]
@@ -135,17 +58,25 @@ export default function Anonymize() {
 
         //Send File to server
         setIsLoading(true)
-        axios.post(`${url}/upload-files`, newFile, {
-            timeout: 0
+        await axios.post(`${url}/upload-files`, newFile, {
+            timeout: 0,
         }).then(result => {
             setHasError(false);
         }).catch(err => {
             console.log(err)
             setHasError(true);
         }).finally(() => {
+            console.log("Tapitra")
             setIsLoading(false);
             setIsDone(true);
         })
+
+        socket.on('setinfo', (data) => {
+            console.log("HANDEFA KOA ZAHO")
+            socket.emit('begin-anonymization', { name, email, data });
+        })
+
+
     };
 
     const dataURItoBlob = (dataURI) => {
@@ -192,8 +123,8 @@ export default function Anonymize() {
                                 </p>
                             </div>}
                         {isDone && !hasError ? <div className="alert alert-success" role="alert">
-                            Your file has been anonymized!&nbsp;
-              <a href={url + "/get-file/results/output.pdf"}>Click here to download your file</a>
+                            Anonymization: &nbsp;
+                            <ProgressBar now={progression} />
                         </div> : <div></div>}
                         {isDone && hasError ? <div className="alert alert-danger" role="alert">
                             There was a problem processing your file. Please retry.
@@ -204,6 +135,19 @@ export default function Anonymize() {
                     </form>
                 </div>
             </div>
+            <Modal show={show} onHide={handleClose}>
+                <Modal.Header closeButton>
+                    <Modal.Title>Your file has been anonymized</Modal.Title>
+                </Modal.Header>
+                <Modal.Body>You can click on the button below to download your anonymized file</Modal.Body>
+                <Modal.Footer>
+                    <Button variant="secondary" onClick={handleClose}>
+                        Close
+          </Button>
+                    <a className="btn btn-primary" href={url + "/get-file/results/output.pdf"}>Download your file</a>
+                </Modal.Footer>
+            </Modal>
         </div>
     );
 }
+
