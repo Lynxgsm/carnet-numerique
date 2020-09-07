@@ -34,6 +34,7 @@ export default function Anonymize() {
         });
 
         socket.on('progression-state', function (data) {
+            console.log(data)
             setprogression(data.message)
         });
 
